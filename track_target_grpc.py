@@ -18,6 +18,7 @@ from core.api.grpc import core_pb2
 import xmlrpc.client
 
 uavs = []
+intention_list = {}
 mynodeseq = 0
 nodecnt = 0
 protocol = 'none'
@@ -84,13 +85,13 @@ def RecordTarget(uavnode):
 #---------------
 # Advertise the target being tracked over UDP
 #---------------
-def AdvertiseUDP(uavnodeid, trgtnodeid):
+def AdvertiseUDP(uavnodeid, trgtnodeid, intention_flag):
   print("AdvertiseUDP")
   addrinfo = socket.getaddrinfo(mcastaddr, None)[0]
   sk = socket.socket(addrinfo[0], socket.SOCK_DGRAM)
   ttl_bin = struct.pack('@i', ttl)
   sk.setsockopt(socket.IPPROTO_IP, socket.IP_MULTICAST_TTL, ttl_bin)
-  buf = str(uavnodeid) + ' ' + str(trgtnodeid)
+  buf = str(intention_flag) + ' ' + str(uavnodeid) + ' ' + str(trgtnodeid)
   sk.sendto(buf.encode(encoding='utf-8',errors='strict'), (addrinfo[4][0], port))
 
 #---------------
@@ -113,8 +114,10 @@ def ReceiveUDP():
   while 1:
     buf, sender = sk.recvfrom(1500)
     buf_str = buf.decode('utf-8')
-    uavidstr, trgtidstr = buf_str.split(" ")        
-    uavnodeid, trgtnodeid = int(uavidstr), int(trgtidstr)
+    intention_str, uavidstr, trgtidstr = buf_str.split(" ")        
+    intention_flag, uavnodeid, trgtnodeid = int(intention_str), int(uavidstr), int(trgtidstr)
+    if intention_flag:	
+	intention_list[uavnodeid] = trgtnodeid
     # Update tracking info for other UAVs
     uavnode = uavs[mynodeseq]
     if uavnode.nodeid != uavnodeid:
@@ -143,6 +146,26 @@ def UpdateTracking(uavnodeid, trgtnodeid):
       
   if protocol == "udp":
     thrdlock.release()
+
+#to consult with other nodes and make a decision
+def Mutual_Consultation(uavnode, trgtnode_id):
+	#create a intention message and send it, just make one more entry into the same function as intention flag
+	intention_list.clear();	
+	AdvertiseUDP(1, uavnode.nodeid, uavnode.trackid)
+	AdvertiseUDP(1, uavnode.nodeid, uavnode.trackid)
+	AdvertiseUDP(1, uavnode.nodeid, uavnode.trackid)
+	AdvertiseUDP(1, uavnode.nodeid, uavnode.trackid)
+	#go for sleep for 1/2 of second till everyone sends their opinion
+	time.sleep(0.5)
+	track_flag = 1
+	for node_id, target_id in intention_list.items():
+		if target_id == trgtnode_id and uavnode > node_id:			
+			track_flag = 0			
+			break
+		
+	#by protocol our node is eligible for tracking the target
+	return track_flag
+	
 
 #---------------
 # Update waypoints for targets tracked, or track new targets
@@ -186,10 +209,13 @@ def TrackTargets(covered_zone, track_range):
             
       if commsflag == 0 or trackflag == 0: 
         # UAV node should track this target
-        print("UAV node should track this target ", trgtnode_id)
-        uavnode.trackid = trgtnode_id
-        updatewypt = 1
-        
+	#i want to track this but first lets check with everyone
+	# write a function and do the decision making, and return back here
+	if Mutual_Consultation(uavnode, trgtnode_id):
+		print("UAV node should track this target ", trgtnode_id)
+		uavnode.trackid = trgtnode_id
+		updatewypt = 1
+
     if updatewypt == 1:
       # Update waypoint for UAV node
       print("Update waypoint")
@@ -208,7 +234,10 @@ def TrackTargets(covered_zone, track_range):
           
   # Advertise target being tracked if using comms 
   if protocol == "udp":
-    AdvertiseUDP(uavnode.nodeid, uavnode.trackid)
+    AdvertiseUDP(0, uavnode.nodeid, uavnode.trackid)
+    AdvertiseUDP(0, uavnode.nodeid, uavnode.trackid)
+    AdvertiseUDP(0, uavnode.nodeid, uavnode.trackid)
+    AdvertiseUDP(0, uavnode.nodeid, uavnode.trackid) 	
     
   # Record the target tracked for displaying proper colors
   # Re-deploy UAV if it's not track anything
