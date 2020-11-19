@@ -19,6 +19,7 @@ import xmlrpc.client
 
 uavs = []
 intention_list = {}
+trackedList = {}
 mynodeseq = 0
 nodecnt = 0
 protocol = 'none'
@@ -112,12 +113,14 @@ def ReceiveUDP():
   sk.setsockopt(socket.IPPROTO_IP, socket.IP_ADD_MEMBERSHIP, mreq)
 
   while 1:
+    print("ReceiveUDP")
     buf, sender = sk.recvfrom(1500)
     buf_str = buf.decode('utf-8')
-    intention_str, uavidstr, trgtidstr = buf_str.split(" ")        
+    trgtidstr, intention_str, uavidstr,  = buf_str.split(" ")        
     intention_flag, uavnodeid, trgtnodeid = int(intention_str), int(uavidstr), int(trgtidstr)
+    print("intention_flag, uavnodeid, trgtnodeid", intention_str, uavidstr, trgtidstr)
     if intention_flag:	
-	intention_list[uavnodeid] = trgtnodeid
+      intention_list[uavnodeid] = trgtnodeid
     # Update tracking info for other UAVs
     uavnode = uavs[mynodeseq]
     if uavnode.nodeid != uavnodeid:
@@ -149,22 +152,23 @@ def UpdateTracking(uavnodeid, trgtnodeid):
 
 #to consult with other nodes and make a decision
 def Mutual_Consultation(uavnode, trgtnode_id):
+  print("Mutual_Consultation")
 	#create a intention message and send it, just make one more entry into the same function as intention flag
-	intention_list.clear();	
-	AdvertiseUDP(1, uavnode.nodeid, uavnode.trackid)
-	AdvertiseUDP(1, uavnode.nodeid, uavnode.trackid)
-	AdvertiseUDP(1, uavnode.nodeid, uavnode.trackid)
-	AdvertiseUDP(1, uavnode.nodeid, uavnode.trackid)
-	#go for sleep for 1/2 of second till everyone sends their opinion
-	time.sleep(0.5)
-	track_flag = 1
-	for node_id, target_id in intention_list.items():
-		if target_id == trgtnode_id and uavnode > node_id:			
-			track_flag = 0			
-			break
-		
-	#by protocol our node is eligible for tracking the target
-	return track_flag
+  #intention_list.clear();	
+  AdvertiseUDP(1, uavnode.nodeid, trgtnode_id)
+  #AdvertiseUDP(1, uavnode.nodeid, uavnode.trackid)
+  #AdvertiseUDP(1, uavnode.nodeid, uavnode.trackid)
+  #AdvertiseUDP(1, uavnode.nodeid, uavnode.trackid)
+#go for sleep for 1/2 of second till everyone sends their opinion
+  time.sleep(5)
+  track_flag = 1
+  for node_id, target_id in intention_list.items():
+    if target_id == trgtnode_id and uavnode.nodeid > node_id:			
+      track_flag = 0			
+      break
+	
+#by protocol our node is eligible for tracking the target
+  return track_flag
 	
 
 #---------------
@@ -186,6 +190,9 @@ def TrackTargets(covered_zone, track_range):
   print("Potential Targets: ", potential_targets)
 
   for trgtnode_id in potential_targets:
+    if trgtnode_id in trackedList:
+      print("Already being tracked, no need to track it")
+      continue
     # If this UAV was tracking this target before and it's still
     # in range then it should keep it.
     # Update waypoint to the new position of the target
@@ -211,10 +218,12 @@ def TrackTargets(covered_zone, track_range):
         # UAV node should track this target
 	#i want to track this but first lets check with everyone
 	# write a function and do the decision making, and return back here
-	if Mutual_Consultation(uavnode, trgtnode_id):
-		print("UAV node should track this target ", trgtnode_id)
-		uavnode.trackid = trgtnode_id
-		updatewypt = 1
+        if Mutual_Consultation(uavnode, trgtnode_id):
+          print("UAV node should track this target ", trgtnode_id)
+          uavnode.trackid = trgtnode_id
+          #update in trackedList
+          trackedList[trgtnode_id] = uavnode.nodeid
+          updatewypt = 1
 
     if updatewypt == 1:
       # Update waypoint for UAV node
@@ -235,9 +244,9 @@ def TrackTargets(covered_zone, track_range):
   # Advertise target being tracked if using comms 
   if protocol == "udp":
     AdvertiseUDP(0, uavnode.nodeid, uavnode.trackid)
-    AdvertiseUDP(0, uavnode.nodeid, uavnode.trackid)
-    AdvertiseUDP(0, uavnode.nodeid, uavnode.trackid)
-    AdvertiseUDP(0, uavnode.nodeid, uavnode.trackid) 	
+    #AdvertiseUDP(0, uavnode.nodeid, uavnode.trackid)
+    #AdvertiseUDP(0, uavnode.nodeid, uavnode.trackid)
+    #AdvertiseUDP(0, uavnode.nodeid, uavnode.trackid) 	
     
   # Record the target tracked for displaying proper colors
   # Re-deploy UAV if it's not track anything
