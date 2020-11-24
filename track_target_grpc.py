@@ -20,6 +20,7 @@ import xmlrpc.client
 uavs = []
 intention_list = {}
 trackedList = {}
+expirationTimer = 5
 mynodeseq = 0
 nodecnt = 0
 protocol = 'none'
@@ -146,16 +147,17 @@ def UpdateTracking(uavnodeid, trgtnodeid):
   if not in_uavs:
     node = CORENode(uavnodeid, trgtnodeid)
     uavs.append(node)   
-      
+  #update in tracking list that this node is tracking this particular target with current time stamp
+  trackedList[trgtnodeid] = (uavnode.nodeid, time.time())    
   if protocol == "udp":
     thrdlock.release()
 
 #to consult with other nodes and make a decision
-def Mutual_Consultation(uavnode, trgtnode_id):
+def Mutual_Consultation(uavnode, trgtnodeid):
   print("Mutual_Consultation")
 	#create a intention message and send it, just make one more entry into the same function as intention flag
   #intention_list.clear();	
-  AdvertiseUDP(1, uavnode.nodeid, trgtnode_id)
+  AdvertiseUDP(1, uavnode.nodeid, trgtnodeid)
   #AdvertiseUDP(1, uavnode.nodeid, uavnode.trackid)
   #AdvertiseUDP(1, uavnode.nodeid, uavnode.trackid)
   #AdvertiseUDP(1, uavnode.nodeid, uavnode.trackid)
@@ -163,7 +165,7 @@ def Mutual_Consultation(uavnode, trgtnode_id):
   time.sleep(5)
   track_flag = 1
   for node_id, target_id in intention_list.items():
-    if target_id == trgtnode_id and uavnode.nodeid > node_id:			
+    if target_id == trgtnodeid and uavnode.nodeid > node_id:			
       track_flag = 0			
       break
 	
@@ -190,9 +192,17 @@ def TrackTargets(covered_zone, track_range):
   print("Potential Targets: ", potential_targets)
 
   for trgtnode_id in potential_targets:
+    print('tarcking list', trackedList)
     if trgtnode_id in trackedList:
-      print("Already being tracked, no need to track it")
-      continue
+      #get current system time and get the last update time, verify it is less than expiration timer, 
+      #otherwise remove entry
+      curTime = time.time()
+      lastEntry = trackedList.get(trgtnode_id)[1]
+      if curTime - lastEntry < expirationTimer:
+        print("Already being tracked, no need to track it")
+      if curTime - lastEntry >= expirationTimer:  
+        trackedList.pop(trgtnode_id)
+        
     # If this UAV was tracking this target before and it's still
     # in range then it should keep it.
     # Update waypoint to the new position of the target
@@ -221,8 +231,8 @@ def TrackTargets(covered_zone, track_range):
         if Mutual_Consultation(uavnode, trgtnode_id):
           print("UAV node should track this target ", trgtnode_id)
           uavnode.trackid = trgtnode_id
-          #update in trackedList
-          trackedList[trgtnode_id] = uavnode.nodeid
+          #no need to update in trackedList, becuase current itself is tracking it
+          #trackedList[trgtnode_id] = (uavnode.nodeid, time.time())
           updatewypt = 1
 
     if updatewypt == 1:
