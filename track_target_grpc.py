@@ -18,7 +18,10 @@ from core.api.grpc import core_pb2
 import xmlrpc.client
 
 uavs = []
+# live list of all nodes: 0 -- dead; 1 - alive
+live_list = {}
 intention_list = {}
+# trackedList maintains which target is maintained by whom
 trackedList = {}
 expirationTimer = 5
 mynodeseq = 0
@@ -45,6 +48,7 @@ class CORENode():
     self.nodeid = nodeid
     self.trackid = track_nodeid
     self.oldtrackid = track_nodeid
+    self.last_seen = None
 
   def __repr__(self):
     return str(self.nodeid)
@@ -95,6 +99,8 @@ def AdvertiseUDP(uavnodeid, trgtnodeid, intention_flag):
   sk.setsockopt(socket.IPPROTO_IP, socket.IP_MULTICAST_TTL, ttl_bin)
   buf = str(intention_flag) + ' ' + str(uavnodeid) + ' ' + str(trgtnodeid)
   sk.sendto(buf.encode(encoding='utf-8',errors='strict'), (addrinfo[4][0], port))
+  print("timestamp", datetime.datetime.now())
+  print("I'm advertising this", str(intention_flag) + ' ' + str(uavnodeid) + ' ' + str(trgtnodeid))
 
 #---------------
 # Receive and parse UDP advertisments
@@ -119,6 +125,7 @@ def ReceiveUDP():
     buf_str = buf.decode('utf-8')
     trgtidstr, intention_str, uavidstr,  = buf_str.split(" ")        
     intention_flag, uavnodeid, trgtnodeid = int(intention_str), int(uavidstr), int(trgtidstr)
+    print("timestamp", datetime.datetime.now())
     print("intention_flag, uavnodeid, trgtnodeid", intention_str, uavidstr, trgtidstr)
     if intention_flag:	
       intention_list[uavnodeid] = trgtnodeid
@@ -141,12 +148,14 @@ def UpdateTracking(uavnodeid, trgtnodeid):
   for uavnode in uavs:
     if uavnode.nodeid == uavnodeid:
       uavnode.trackid = trgtnodeid
+      uavnode.last_seen = time.time()
       in_uavs = True
 
   # Otherwise add UAV node to UAV list
   if not in_uavs:
     node = CORENode(uavnodeid, trgtnodeid)
     uavs.append(node)   
+    node.last_seen = time.time()
   #update in tracking list that this node is tracking this particular target with current time stamp
   trackedList[trgtnodeid] = (uavnode.nodeid, time.time())    
   if protocol == "udp":
@@ -162,7 +171,13 @@ def Mutual_Consultation(uavnode, trgtnodeid):
   #AdvertiseUDP(1, uavnode.nodeid, uavnode.trackid)
   #AdvertiseUDP(1, uavnode.nodeid, uavnode.trackid)
 #go for sleep for 1/2 of second till everyone sends their opinion
-  time.sleep(5)
+  print("timestamp", datetime.datetime.now())
+  print("Going for sleep now")
+  thrdlock.release()
+  time.sleep(2)
+  print("timestamp", datetime.datetime.now())
+  print("Just wokeup from sleep now")
+  thrdlock.acquire()
   track_flag = 1
   for node_id, target_id in intention_list.items():
     if target_id == trgtnodeid and uavnode.nodeid > node_id:			
@@ -192,6 +207,7 @@ def TrackTargets(covered_zone, track_range):
   print("Potential Targets: ", potential_targets)
 
   for trgtnode_id in potential_targets:
+    trackflag = 0
     print('tarcking list', trackedList)
     if trgtnode_id in trackedList:
       #get current system time and get the last update time, verify it is less than expiration timer, 
@@ -199,7 +215,8 @@ def TrackTargets(covered_zone, track_range):
       curTime = time.time()
       lastEntry = trackedList.get(trgtnode_id)[1]
       if curTime - lastEntry < expirationTimer:
-        print("Already being tracked, no need to track it")
+        print("Already being tracked by someone, no need to track it")
+        trackflag = 1
       if curTime - lastEntry >= expirationTimer:  
         trackedList.pop(trgtnode_id)
         
@@ -213,11 +230,11 @@ def TrackTargets(covered_zone, track_range):
         uavnode.trackid = trgtnode_id
         updatewypt = 1     
 
-    # If this UAV was not tracking any target and finds one in range    
-    if uavnode.oldtrackid == -1:
+    # If this UAV was not tracking any target and finds one in range
+    # and no one else is tracking it
+    if not trackflag and uavnode.oldtrackid == -1:
       print("Node %d found potential target %d" % (uavnode.nodeid, trgtnode_id))
       if commsflag == 1:
-        trackflag = 0
         for uavnodetmp in uavs:
           if uavnodetmp.trackid == trgtnode_id or \
               (uavnodetmp.trackid == 0 and uavnodetmp.oldtrackid == trgtnode_id):
@@ -254,7 +271,7 @@ def TrackTargets(covered_zone, track_range):
   # Advertise target being tracked if using comms 
   if protocol == "udp":
     AdvertiseUDP(0, uavnode.nodeid, uavnode.trackid)
-    #AdvertiseUDP(0, uavnode.nodeid, uavnode.trackid)
+    AdvertiseUDP(0, uavnode.nodeid, uavnode.trackid)
     #AdvertiseUDP(0, uavnode.nodeid, uavnode.trackid)
     #AdvertiseUDP(0, uavnode.nodeid, uavnode.trackid) 	
     
