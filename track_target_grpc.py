@@ -12,14 +12,16 @@ import glob
 import subprocess
 import threading
 import datetime
+#import pdb
 
 from core.api.grpc import client
 from core.api.grpc import core_pb2
 import xmlrpc.client
 
+
 uavs = []
 # live list of all nodes: 0 -- dead; 1 - alive
-ack_list = {1:0, 2:0, 3:0, 4:0, 5:0, 6:0, 7:0, 8:0 }
+ack_list = {1:0, 2:0, 3:0, 4:0, 6:0, 7:0, 8:0, 9:0 }
 intention_list = {}
 # trackedList maintains which target is maintained by whom
 trackedList = {}
@@ -67,7 +69,8 @@ class ReceiveUDPThread(threading.Thread):
 
 # reseting ack list to 0's for all nodes
 def AckList_reset():
-  ack_list = {1:0, 2:0, 3:0, 4:0, 5:0, 6:0, 7:0, 8:0} 
+  global ack_list
+  ack_list = {1:0, 2:0, 3:0, 4:0, 6:0, 7:0, 8:0, 9:0}
 
 #---------------
 # Calculate the distance between two modes (on a map)
@@ -104,7 +107,7 @@ def AdvertiseUDP(buf):
   #buf = str(intention_flag) + ' ' + str(uavnodeid) + ' ' + str(trgtnodeid)
   sk.sendto(buf.encode(encoding='utf-8',errors='strict'), (addrinfo[4][0], port))
   print("timestamp", datetime.datetime.now())
-  print("I'm advertising this", buf)
+  #print("I'm advertising this", buf)
 
 #---------------
 # Receive and parse UDP advertisments
@@ -129,6 +132,7 @@ def ReceiveUDP():
     buf_str = buf.decode('utf-8')
     myuavnode = uavs[mynodeseq]
     packet = buf_str.split(" ")
+    #print("ReceiveUDP", packet)
     if packet[0] == "ack":
       updateAck_list(packet, myuavnode)
       
@@ -143,7 +147,7 @@ def ReceiveUDP():
       #intention_list[uavnodeid] = trgtnodeid
     #its a normal status pack
     else:
-      uavnodeid, trgtnodeid = packet[0], packet[1]
+      uavnodeid, trgtnodeid = int(packet[0]), int(packet[1])
       UpdateTracking(uavnodeid, trgtnodeid)
     #trgtidstr, intention_str, uavidstr  = buf_str.split(" ")        
     #intention_flag, uavnodeid, trgtnodeid = int(intention_str), int(uavidstr), int(trgtidstr)
@@ -164,6 +168,9 @@ def updateAck_list(packet, myuavnode):
   trgtnodeid = int(packet[3])
   if receiverUAV == myuavnode.nodeid and trgtnodeid == myuavnode.cur_intention:
     ack_list[senderUAV] = 1
+    #print("got ack from ", senderUAV, "for targetnode: ", trgtnodeid, "updated it to ack list")
+    print("intention list: ", intention_list)
+    print("ack list: ", ack_list)
 
 #make an acket pack
 def createAckPacket(senderUAVid, receiverUAVid, targetid):
@@ -171,13 +178,15 @@ def createAckPacket(senderUAVid, receiverUAVid, targetid):
   return buf
   
 def sendAckPacket(packet, myuavnode):
+  #print("sendAckPacket")
   # its a contention packet I need to sent an ack back
   #trgtidstr, intention_str, uavidstr  = buf_str.split(" ") 
   uavnodeid, trgtnodeid =  int(packet[1]), int(packet[2])
   buf = createAckPacket(myuavnode.nodeid, uavnodeid, trgtnodeid)
+  AdvertiseUDP(buf)
   #todo: send it
-  print("timestamp", datetime.datetime.now())
-  print("intention_flag, uavnodeid, trgtnodeid", intention_str, uavidstr, trgtidstr)
+  #print("timestamp", datetime.datetime.now())
+  #print("intention_flag, uavnodeid, trgtnodeid", intention_str, uavidstr, trgtidstr)
   intention_list[uavnodeid] = trgtnodeid
     
 #---------------
@@ -200,10 +209,12 @@ def UpdateTracking(uavnodeid, trgtnodeid):
   # Otherwise add UAV node to UAV list
   if not in_uavs:
     node = CORENode(uavnodeid, trgtnodeid)
-    uavs.append(node)   
     node.last_seen = time.time()
+    uavs.append(node)   
+    
+    #print("node details", node.nodeid, node.last_seen)
   #update in tracking list that this node is tracking this particular target with current time stamp
-  trackedList[trgtnodeid] = (uavnode.nodeid, time.time())    
+  trackedList[trgtnodeid] = (uavnodeid, time.time())    
   if protocol == "udp":
     thrdlock.release()
 
@@ -218,7 +229,10 @@ def Mutual_Consultation(uavnode, trgtnodeid):
   # I'm sending a intention message I want to make sure all the live nodes got it
   # by getting back their acks
   # reset the acklist for this particular target
+  print("ack_list before reset: ", ack_list)
   AckList_reset()
+  #ack_list = {1:0, 2:0, 3:0, 4:0, 6:0, 7:0, 8:0, 9:0}
+  print("ack_list after reset: ", ack_list)
   #AdvertiseUDP(1, uavnode.nodeid, trgtnodeid)
   #AdvertiseUDP(1, uavnode.nodeid, uavnode.trackid)
   #AdvertiseUDP(1, uavnode.nodeid, uavnode.trackid)
@@ -236,6 +250,7 @@ def Mutual_Consultation(uavnode, trgtnodeid):
   while not AllgotPacket:
     for uavnodetmp in uavs:
     #make decision if he is alive
+      #print("uavnodetmp.nodeid", uavnodetmp.nodeid, "uavnodetmp.last_seen", uavnodetmp.last_seen)
       if uavnodetmp.last_seen - time.time() <= 3:
       #so he is alive, check if you have got an ack from him
       #you did not get a ack from him, retransmit
@@ -247,19 +262,21 @@ def Mutual_Consultation(uavnode, trgtnodeid):
   #AdvertiseUDP(1, uavnode.nodeid, uavnode.trackid)
   #AdvertiseUDP(1, uavnode.nodeid, uavnode.trackid)
   #go for sleep for 1/2 of second till everyone sends their opinion
-          print("timestamp", datetime.datetime.now())
+          #print("timestamp", datetime.datetime.now())
           print("Going for sleep now")  
           thrdlock.release()
           time.sleep(2)
-          print("timestamp", datetime.datetime.now())
+          #print("timestamp", datetime.datetime.now())
           print("Just wokeup from sleep now")
           thrdlock.acquire()
           break
     else:
-      AllgotPakcet = True
+      print("received all acks")
+      AllgotPacket = True
   #todo: I also need to make sure that I received everyone's constent   
   track_flag = 1
   for node_id, target_id in intention_list.items():
+    print("in for loop")
     if target_id == trgtnodeid and uavnode.nodeid > node_id:			
       track_flag = 0			
       break
@@ -316,6 +333,7 @@ def TrackTargets(covered_zone, track_range):
     if not trackflag and uavnode.oldtrackid == -1:
       print("Node %d found potential target %d" % (uavnode.nodeid, trgtnode_id))
       if commsflag == 1:
+        #todo: can comment below part
         for uavnodetmp in uavs:
           if uavnodetmp.trackid == trgtnode_id or \
               (uavnodetmp.trackid == 0 and uavnodetmp.oldtrackid == trgtnode_id):
@@ -380,6 +398,7 @@ def main():
   global nodecnt
   global core
   global session_id
+  #global ack_list
 
   # Get command line inputs 
   parser = argparse.ArgumentParser()
@@ -427,7 +446,13 @@ def main():
   nodepath = glob.glob(corepath)[0]
   msecinterval = float(args.interval)
   secinterval = msecinterval/1000
+  
+  #import pdb; pdb.set_trace()
+  #import pdb
+  #breakpoint()
 
+  #pdb.set_trace()
+  
   if protocol == "udp":
     # Create UDP receiving thread
     recvthrd = ReceiveUDPThread()
