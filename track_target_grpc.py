@@ -25,7 +25,7 @@ ack_list = {1:0, 2:0, 3:0, 4:0, 6:0, 7:0, 8:0, 9:0 }
 intention_list = {}
 # trackedList maintains which target is maintained by whom
 trackedList = {}
-expirationTimer = 5
+expirationTimer = 2
 mynodeseq = 0
 nodecnt = 0
 protocol = 'none'
@@ -171,6 +171,7 @@ def updateAck_list(packet, myuavnode):
     #print("got ack from ", senderUAV, "for targetnode: ", trgtnodeid, "updated it to ack list")
     print("intention list: ", intention_list)
     print("ack list: ", ack_list)
+    print('tarcking list', trackedList)
 
 #make an acket pack
 def createAckPacket(senderUAVid, receiverUAVid, targetid):
@@ -193,7 +194,7 @@ def sendAckPacket(packet, myuavnode):
 # Update tracking info based on a received advertisement
 #---------------
 def UpdateTracking(uavnodeid, trgtnodeid):
-
+  print("UpdateTracking")
   if protocol == "udp":
     thrdlock.acquire()
     
@@ -229,10 +230,10 @@ def Mutual_Consultation(uavnode, trgtnodeid):
   # I'm sending a intention message I want to make sure all the live nodes got it
   # by getting back their acks
   # reset the acklist for this particular target
-  print("ack_list before reset: ", ack_list)
+  #print("ack_list before reset: ", ack_list)
   AckList_reset()
   #ack_list = {1:0, 2:0, 3:0, 4:0, 6:0, 7:0, 8:0, 9:0}
-  print("ack_list after reset: ", ack_list)
+  #print("ack_list after reset: ", ack_list)
   #AdvertiseUDP(1, uavnode.nodeid, trgtnodeid)
   #AdvertiseUDP(1, uavnode.nodeid, uavnode.trackid)
   #AdvertiseUDP(1, uavnode.nodeid, uavnode.trackid)
@@ -251,7 +252,7 @@ def Mutual_Consultation(uavnode, trgtnodeid):
     for uavnodetmp in uavs:
     #make decision if he is alive
       #print("uavnodetmp.nodeid", uavnodetmp.nodeid, "uavnodetmp.last_seen", uavnodetmp.last_seen)
-      if uavnodetmp.last_seen - time.time() <= 3:
+      if uavnodetmp.last_seen - time.time() <= 1:
       #so he is alive, check if you have got an ack from him
       #you did not get a ack from him, retransmit
         if ack_list[uavnodetmp.nodeid] == 0:
@@ -265,7 +266,7 @@ def Mutual_Consultation(uavnode, trgtnodeid):
           #print("timestamp", datetime.datetime.now())
           print("Going for sleep now")  
           thrdlock.release()
-          time.sleep(2)
+          time.sleep(1)
           #print("timestamp", datetime.datetime.now())
           print("Just wokeup from sleep now")
           thrdlock.acquire()
@@ -277,8 +278,11 @@ def Mutual_Consultation(uavnode, trgtnodeid):
   track_flag = 1
   for node_id, target_id in intention_list.items():
     print("in for loop")
-    if target_id == trgtnodeid and uavnode.nodeid > node_id:			
-      track_flag = 0			
+    # make sure by the time you went to sleep no one else started targeting it
+    #if someone is already tracking or any node lesser than my node id has intention to track it, I drop
+    if trgtnodeid in trackedList or (target_id == trgtnodeid and uavnode.nodeid > node_id):			
+      track_flag = 0	
+      #todo: tracking list could have been updated here		
       break
 	
 #by protocol our node is eligible for tracking the target
@@ -304,6 +308,7 @@ def TrackTargets(covered_zone, track_range):
   print("Potential Targets: ", potential_targets)
 
   for trgtnode_id in potential_targets:
+    #trackflag is for that particular target id
     trackflag = 0
     print('tarcking list', trackedList)
     if trgtnode_id in trackedList:
@@ -312,10 +317,10 @@ def TrackTargets(covered_zone, track_range):
       curTime = time.time()
       lastEntry = trackedList.get(trgtnode_id)[1]
       if curTime - lastEntry < expirationTimer:
-        print("Already being tracked by someone, no need to track it")
+        print(trgtnode_id," Already being tracked by someone, no need to track it")
         trackflag = 1
       if curTime - lastEntry >= expirationTimer:  
-        print("remove target and node entry from tagets track dict")
+        print(f'remove target {trgtnode_id} and node entry {trackedList.get(trgtnode_id)[0]} from tagets tracklist maybe target went out of range')
         trackedList.pop(trgtnode_id)
         
     # If this UAV was tracking this target before and it's still
@@ -332,13 +337,13 @@ def TrackTargets(covered_zone, track_range):
     # and no one else is tracking it
     if not trackflag and uavnode.oldtrackid == -1:
       print("Node %d found potential target %d" % (uavnode.nodeid, trgtnode_id))
-      if commsflag == 1:
+      #if commsflag == 1:
         #todo: can comment below part
-        for uavnodetmp in uavs:
-          if uavnodetmp.trackid == trgtnode_id or \
-              (uavnodetmp.trackid == 0 and uavnodetmp.oldtrackid == trgtnode_id):
-            print("Target ", trgtnode_id, " is being tracked already")
-            trackflag = 1
+        #for uavnodetmp in uavs:
+         # if uavnodetmp.trackid == trgtnode_id or \
+         #     (uavnodetmp.trackid == 0 and uavnodetmp.oldtrackid == trgtnode_id):
+          #  print("Target ", trgtnode_id, " is being tracked already")
+          #  trackflag = 1
             
       if commsflag == 0 or trackflag == 0: 
         # UAV node should track this target
@@ -348,8 +353,11 @@ def TrackTargets(covered_zone, track_range):
           print("UAV node should track this target ", trgtnode_id)
           uavnode.trackid = trgtnode_id
           #no need to update in trackedList, becuase current itself is tracking it
-          #trackedList[trgtnode_id] = (uavnode.nodeid, time.time())
+          #lets update it to trackedList so that I dont look someone else to track again
+          #now lets break from this loop and update color and send notification to others
+          trackedList[trgtnode_id] = (uavnode.nodeid, time.time())
           updatewypt = 1
+          break
 
     if updatewypt == 1:
       # Update waypoint for UAV node
@@ -376,6 +384,7 @@ def TrackTargets(covered_zone, track_range):
     #AdvertiseUDP(0, uavnode.nodeid, uavnode.trackid)
     #AdvertiseUDP(0, uavnode.nodeid, uavnode.trackid) 	
     
+  #this code will only hit if there is a change in node's tracking  
   # Record the target tracked for displaying proper colors
   # Re-deploy UAV if it's not track anything
   if uavnode.trackid != uavnode.oldtrackid:
