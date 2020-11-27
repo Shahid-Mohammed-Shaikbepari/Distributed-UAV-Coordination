@@ -20,7 +20,8 @@ import xmlrpc.client
 
 
 uavs = []
-# live list of all nodes: 0 -- dead; 1 - alive
+# dead set
+dead_nodes = set()
 ack_list = {1:0, 2:0, 3:0, 4:0, 6:0, 7:0, 8:0, 9:0 }
 intention_list = {}
 # trackedList maintains which target is maintained by whom
@@ -52,6 +53,7 @@ class CORENode():
     self.oldtrackid = track_nodeid
     self.last_seen = None
     self.cur_intention = -1
+    #self.alive = False
 
   def __repr__(self):
     return str(self.nodeid)
@@ -138,29 +140,19 @@ def ReceiveUDP():
       
     elif packet[0] == "in":
       sendAckPacket(packet, myuavnode)
-      #trgtidstr, intention_str, uavidstr  = buf_str.split(" ")        
-      #intention_flag, uavnodeid, trgtnodeid =  int(packet[1]), int(packet[2])
-      #print("timestamp", datetime.datetime.now())
-      #print("intention_flag, uavnodeid, trgtnodeid", intention_str, uavidstr, trgtidstr)
-      # its a contention packet I need to sent an ack back
-      #if intention_flag:	
-      #intention_list[uavnodeid] = trgtnodeid
+      
     #its a normal status pack
     else:
       uavnodeid, trgtnodeid = int(packet[0]), int(packet[1])
       UpdateTracking(uavnodeid, trgtnodeid)
-    #trgtidstr, intention_str, uavidstr  = buf_str.split(" ")        
-    #intention_flag, uavnodeid, trgtnodeid = int(intention_str), int(uavidstr), int(trgtidstr)
-    #print("timestamp", datetime.datetime.now())
-    #print("intention_flag, uavnodeid, trgtnodeid", intention_str, uavidstr, trgtidstr)
-    # its a contention packet I need to sent an ack back
-    #if intention_flag:	
-    #  intention_list[uavnodeid] = trgtnodeid
-      
-    # Update tracking info for other UAVs
-    #myuavnode = uavs[mynodeseq]
-    #if myuavnode.nodeid != uavnodeid:
-    #  UpdateTracking(uavnodeid, trgtnodeid)
+    
+     
+def updateNodeLastSeen(nodeid):
+  for uavnode in uavs:
+    if uavnode.nodeid == nodeid:
+      uavnode.last_seen = time.time()
+      if nodeid in dead_nodes:
+        dead_nodes.remove(nodeid)
 
 def updateAck_list(packet, myuavnode):
   senderUAV = int(packet[1])
@@ -172,45 +164,46 @@ def updateAck_list(packet, myuavnode):
     print("intention list: ", intention_list)
     print("ack list: ", ack_list)
     print('tarcking list', trackedList)
-
+    print('dead set: ', dead_nodes)
+  updateNodeLastSeen(senderUAV)
+  
 #make an acket pack
 def createAckPacket(senderUAVid, receiverUAVid, targetid):
   buf = 'ack' + ' ' + str(senderUAVid) + ' ' + str(receiverUAVid) + ' ' + str(targetid)
   return buf
   
 def sendAckPacket(packet, myuavnode):
-  #print("sendAckPacket")
-  # its a contention packet I need to sent an ack back
-  #trgtidstr, intention_str, uavidstr  = buf_str.split(" ") 
   uavnodeid, trgtnodeid =  int(packet[1]), int(packet[2])
   buf = createAckPacket(myuavnode.nodeid, uavnodeid, trgtnodeid)
-  AdvertiseUDP(buf)
   #todo: send it
-  #print("timestamp", datetime.datetime.now())
-  #print("intention_flag, uavnodeid, trgtnodeid", intention_str, uavidstr, trgtidstr)
+  AdvertiseUDP(buf)
   intention_list[uavnodeid] = trgtnodeid
+  updateNodeLastSeen(uavnodeid)
     
 #---------------
-# Update tracking info based on a received advertisement
+# Update tracking info based on a received advertisement, status packet
 #---------------
 def UpdateTracking(uavnodeid, trgtnodeid):
+  global dead_nodes
   print("UpdateTracking")
   if protocol == "udp":
     thrdlock.acquire()
     
   # Update corresponding UAV node structure with tracking info
   # if UAV node is in the UAV list
+  # Update his last seen and check if was in dead nodes set, remove from it
   in_uavs = False
   for uavnode in uavs:
     if uavnode.nodeid == uavnodeid:
       uavnode.trackid = trgtnodeid
-      uavnode.last_seen = time.time()
       in_uavs = True
-
+      updateNodeLastSeen(uavnodeid)
+      
   # Otherwise add UAV node to UAV list
   if not in_uavs:
     node = CORENode(uavnodeid, trgtnodeid)
     node.last_seen = time.time()
+    #node.alive = True
     uavs.append(node)   
     
     #print("node details", node.nodeid, node.last_seen)
@@ -224,41 +217,27 @@ def CreateIntentionPacket(uavnodeid, trgtnodeid):
   
 #to consult with other nodes and make a decision
 def Mutual_Consultation(uavnode, trgtnodeid):
+  global dead_nodes
   print("Mutual_Consultation")
-	#create a intention message and send it, just make one more entry into the same function as intention flag
-  #intention_list.clear();	
+  #create a intention message and send it, just make one more entry into the same function as intention flag	
   # I'm sending a intention message I want to make sure all the live nodes got it
   # by getting back their acks
   # reset the acklist for this particular target
-  #print("ack_list before reset: ", ack_list)
   AckList_reset()
-  #ack_list = {1:0, 2:0, 3:0, 4:0, 6:0, 7:0, 8:0, 9:0}
-  #print("ack_list after reset: ", ack_list)
-  #AdvertiseUDP(1, uavnode.nodeid, trgtnodeid)
-  #AdvertiseUDP(1, uavnode.nodeid, uavnode.trackid)
-  #AdvertiseUDP(1, uavnode.nodeid, uavnode.trackid)
-  #AdvertiseUDP(1, uavnode.nodeid, uavnode.trackid)
-#go for sleep for 1/2 of second till everyone sends their opinion
-  #print("timestamp", datetime.datetime.now())
-  #print("Going for sleep now")
-  #thrdlock.release()
-  #time.sleep(2)
-  #print("timestamp", datetime.datetime.now())
-  #print("Just wokeup from sleep now")
-  #thrdlock.acquire()
   # I should get data from all the live nodes, else retransmit
   AllgotPacket = False
   while not AllgotPacket:
     for uavnodetmp in uavs:
     #make decision if he is alive
       #print("uavnodetmp.nodeid", uavnodetmp.nodeid, "uavnodetmp.last_seen", uavnodetmp.last_seen)
-      if uavnodetmp.last_seen - time.time() <= 1:
+      if time.time() - uavnodetmp.last_seen  <= 1:
       #so he is alive, check if you have got an ack from him
       #you did not get a ack from him, retransmit
         if ack_list[uavnodetmp.nodeid] == 0:
           uavnode.cur_intention = trgtnodeid
           buf = CreateIntentionPacket(uavnode.nodeid, trgtnodeid)
           AdvertiseUDP(buf)
+          #todo: check by adding redundancy
   #AdvertiseUDP(1, uavnode.nodeid, uavnode.trackid)
   #AdvertiseUDP(1, uavnode.nodeid, uavnode.trackid)
   #AdvertiseUDP(1, uavnode.nodeid, uavnode.trackid)
@@ -271,6 +250,11 @@ def Mutual_Consultation(uavnode, trgtnodeid):
           print("Just wokeup from sleep now")
           thrdlock.acquire()
           break
+      else:
+        #the node is dead, so add to cementry
+        #todo: maybe once he comes back we may need to remove him from dead_nodes
+        print(f'add {uavnodetmp.nodeid} to dead')
+        dead_nodes.add(uavnodetmp.nodeid)    
     else:
       print("received all acks")
       AllgotPacket = True
@@ -280,7 +264,7 @@ def Mutual_Consultation(uavnode, trgtnodeid):
     print("in for loop")
     # make sure by the time you went to sleep no one else started targeting it
     #if someone is already tracking or any node lesser than my node id has intention to track it, I drop
-    if trgtnodeid in trackedList or (target_id == trgtnodeid and uavnode.nodeid > node_id):			
+    if trgtnodeid in trackedList or (node_id not in dead_nodes and target_id == trgtnodeid and uavnode.nodeid > node_id):			
       track_flag = 0	
       #todo: tracking list could have been updated here		
       break
