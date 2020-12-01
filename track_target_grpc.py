@@ -12,6 +12,7 @@ import glob
 import subprocess
 import threading
 import datetime
+import random
 #import pdb
 
 from core.api.grpc import client
@@ -172,12 +173,14 @@ def createAckPacket(senderUAVid, receiverUAVid, targetid):
   buf = 'ack' + ' ' + str(senderUAVid) + ' ' + str(receiverUAVid) + ' ' + str(targetid)
   return buf
   
+# create an acknowledgement packet and sent and also update intention_list  
+# our own node's intention will aslo be present in intention list
 def sendAckPacket(packet, myuavnode):
-  uavnodeid, trgtnodeid =  int(packet[1]), int(packet[2])
+  uavnodeid, trgtnodeid, rand_num =  int(packet[1]), int(packet[2]), int(packet[3])
   buf = createAckPacket(myuavnode.nodeid, uavnodeid, trgtnodeid)
-  #todo: send it
+  #send it
   AdvertiseUDP(buf)
-  intention_list[uavnodeid] = trgtnodeid
+  intention_list[uavnodeid] = (trgtnodeid, rand_num)
   updateNodeLastSeen(uavnodeid)
     
 #---------------
@@ -212,8 +215,10 @@ def UpdateTracking(uavnodeid, trgtnodeid):
   if protocol == "udp":
     thrdlock.release()
 
-def CreateIntentionPacket(uavnodeid, trgtnodeid):
-  return 'in' + ' ' + str(uavnodeid) + ' ' + str(trgtnodeid)
+def CreateIntentionPacket(uavnodeid, trgtnodeid, myRandomNum):
+  #generate a random number and send it
+  #myRandomNum = random.randint(-10**9, 10**9)
+  return 'in' + ' ' + str(uavnodeid) + ' ' + str(trgtnodeid) + ' ' + str(myRandomNum) 
   
 #to consult with other nodes and make a decision
 def Mutual_Consultation(uavnode, trgtnodeid):
@@ -226,7 +231,9 @@ def Mutual_Consultation(uavnode, trgtnodeid):
   AckList_reset()
   # I should get data from all the live nodes, else retransmit
   AllgotPacket = False
+  myRandomNum = random.randint(-10**9, 10**9)
   while not AllgotPacket:
+    
     for uavnodetmp in uavs:
     #make decision if he is alive
       #print("uavnodetmp.nodeid", uavnodetmp.nodeid, "uavnodetmp.last_seen", uavnodetmp.last_seen)
@@ -235,12 +242,10 @@ def Mutual_Consultation(uavnode, trgtnodeid):
       #you did not get a ack from him, retransmit
         if ack_list[uavnodetmp.nodeid] == 0:
           uavnode.cur_intention = trgtnodeid
-          buf = CreateIntentionPacket(uavnode.nodeid, trgtnodeid)
+          buf = CreateIntentionPacket(uavnode.nodeid, trgtnodeid, myRandomNum)
           AdvertiseUDP(buf)
           #todo: check by adding redundancy
-  #AdvertiseUDP(1, uavnode.nodeid, uavnode.trackid)
-  #AdvertiseUDP(1, uavnode.nodeid, uavnode.trackid)
-  #AdvertiseUDP(1, uavnode.nodeid, uavnode.trackid)
+  
   #go for sleep for 1/2 of second till everyone sends their opinion
           #print("timestamp", datetime.datetime.now())
           print("Going for sleep now")  
@@ -260,14 +265,23 @@ def Mutual_Consultation(uavnode, trgtnodeid):
       AllgotPacket = True
   #todo: I also need to make sure that I received everyone's constent   
   track_flag = 1
-  for node_id, target_id in intention_list.items():
+  sameNumberFound = False
+  for node_id in intention_list.keys():
     print("in for loop")
+    target_id, node_rand_num = intention_list.get(node_id)
+    my_rand_num = intention_list.get(uavnode.nodeid)[1]
     # make sure by the time you went to sleep no one else started targeting it
-    #if someone is already tracking or any node lesser than my node id has intention to track it, I drop
-    if trgtnodeid in trackedList or (node_id not in dead_nodes and target_id == trgtnodeid and uavnode.nodeid > node_id):			
+    #if someone is already tracking or any node generated greater random number than me, I drop
+    if trgtnodeid in trackedList or (node_id not in dead_nodes and target_id == trgtnodeid and node_rand_num > my_rand_num ):			
       track_flag = 0	
       #todo: tracking list could have been updated here		
       break
+    elif node_id != uavnode.nodeid and node_id not in dead_nodes and target_id == trgtnodeid and node_rand_num == my_rand_num:
+     # track_flag = Mutual_Consultation(uavnode, trgtnodeid)  
+      sameNumberFound = True
+      break
+  if sameNumberFound:
+    track_flag = Mutual_Consultation(uavnode, trgtnodeid)
 	
 #by protocol our node is eligible for tracking the target
   return track_flag
