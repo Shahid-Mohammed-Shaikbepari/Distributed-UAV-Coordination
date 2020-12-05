@@ -19,3 +19,18 @@ I've designed three kinds of packets for the communications among them viz. Stat
 ### Results:
 Acheived all the drones tracking different targets in with a low latency of avg 10-15 seconds depending upon the delay and packet drop rate
 
+### Images
+
+#### Initially when targets are away from drones
+![](images/Screenshot%20from%202020-12-04%2018-40-39.png)
+
+#### As soon as all targets are brought into the range of drones
+![](images/Screenshot%20from%202020-12-04%2018-41-38.png)
+
+#### The drones start tracking the target distributedly without two drones tracking same target
+![](images/Screenshot%20from%202020-12-04%2018-41-41.png)
+
+#### All the drones tracking different targets
+![](images/Screenshot%20from%202020-12-04%2018-42-28.png)
+
+![](images/Screenshot%20from%202020-12-04%2018-42-29.png)
