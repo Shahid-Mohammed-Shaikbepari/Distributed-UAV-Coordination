@@ -1,5 +1,5 @@
-# Drone_project
-The project is we eight drones and eight targets in a WLAN, we want our drones to track these targets without any conflict.
+# Distriubuted UAV Coordination
+The project has eight UAV(drones) and eight targets in a WLAN, we want our drones to track these targets without any conflict.
 
 ### Technologies: tracking UAVs code was written in Python, CORE was used for emulation
 
